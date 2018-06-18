@@ -1,0 +1,161 @@
+---
+- hosts: all
+  tasks:
+  - name:    Install prerequisites
+    apt:     name={{item}} update_cache=yes
+    become: yes
+    with_items:
+     - apt-transport-https
+     - ca-certificates
+     - curl
+     - software-properties-common
+  - name: Add Kube GPG key
+    become: yes
+    apt_key: url=https://packages.cloud.google.com/apt/doc/apt-key.gpg
+  - name: Add Kube APT repository
+    become: yes
+    apt_repository:
+      repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+  - name: Install Kube
+    become: yes
+    apt: name={{item}} state=installed
+    with_items:
+      - kubelet 
+      - kubeadm
+      - kubectl
+  - name: cgroup config
+    become: yes
+    lineinfile: 
+      path: /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+      line: 'cgroup-driver=cgroupfs'
+  - name: restart kubelet and daemon-reload to pick up config changes
+    become: yes
+    systemd:
+      state: restarted
+      daemon_reload: yes
+      name: kubelet
+  - name: Download cfssl to masters
+    become: yes
+    when: inventory_hostname in groups['ca']
+    get_url:
+      url: https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+      dest: /usr/local/bin/cfssl
+      mode: 0775
+  - name: Download cfssljson to masters
+    become: yes
+    when: inventory_hostname in groups['ca']
+    get_url:
+      url: https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+      dest: /usr/local/bin/cfssljson
+      mode: 0775
+  - name: Creates directory
+    become: yes
+    when: inventory_hostname in groups['ca']
+    file: path=/etc/kubernetes/pki/etcd/ state=directory
+  - name: copy ca-config.json
+    become: yes
+    when: inventory_hostname in groups['ca']
+    copy:
+      src: ca-config.json
+      dest: /etc/kubernetes/pki/etcd/ca-config.json
+  - name: copy ca-csr.json
+    become: yes
+    when: inventory_hostname in groups['control']
+    copy:
+      src: ca-csr.json
+      dest: /etc/kubernetes/pki/etcd/ca-csr.json
+  - name: copy client.json
+    become: yes
+    when: inventory_hostname in groups['ca']
+    copy:
+      src: client.json
+      dest: /etc/kubernetes/pki/etcd/client.json
+  - name: generate ca certs
+    become: yes
+    when: inventory_hostname in groups['ca']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ && cfssl gencert -initca /etc/kubernetes/pki/etcd/ca-csr.json | cfssljson -bare ca -"
+  - name: generate client certs
+    become: yes
+    when: inventory_hostname in groups['ca']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ && cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=client client.json | cfssljson -bare client"
+  - name: fetch ca.pem
+    become: yes
+    when: inventory_hostname in groups['ca']
+    fetch:
+      src: /etc/kubernetes/pki/etcd/ca.pem
+      dest: ./ca.pem
+      flat: true
+  - name: fetch ca-key.pem
+    become: yes
+    when: inventory_hostname in groups['ca']
+    fetch:
+      src: /etc/kubernetes/pki/etcd/ca-key.pem
+      dest: ./ca-key.pem
+      flat: true
+  - name: fetch client.pem
+    become: yes
+    when: inventory_hostname in groups['ca']
+    fetch:
+      src: /etc/kubernetes/pki/etcd/client.pem
+      dest: ./client.pem
+      flat: true
+  - name: fetch client-key.pem
+    become: yes
+    when: inventory_hostname in groups['ca']
+    fetch:
+      src: /etc/kubernetes/pki/etcd/client-key.pem
+      dest: ./client-key.pem
+      flat: true
+  - name: copy ca.pem to other masters
+    become: yes
+    when: inventory_hostname in groups['other-cas']
+    copy:
+      src: ca.pem
+      dest: /etc/kubernetes/pki/etcd/ca.pem
+  - name: copy ca-key.pem to other masters
+    become: yes
+    when: inventory_hostname in groups['other-cas']
+    copy:
+      src: ca-key.pem
+      dest: /etc/kubernetes/pki/etcd/ca-key.pem
+  - name: copy client.pem to other masters
+    become: yes
+    when: inventory_hostname in groups['other-cas']
+    copy:
+      src: client.pem
+      dest: /etc/kubernetes/pki/etcd/client.pem
+  - name: copy client-key.pem to other masters
+    become: yes
+    when: inventory_hostname in groups['other-cas']
+    copy:
+      src: client-key.pem
+      dest: /etc/kubernetes/pki/etcd/client-key.pem
+  - name: something1
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ && cfssl print-defaults csr > config.json"
+  - name: something2
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ &&  sed -i '0,/CN/{s/example\.net/'\"$PEER_NAME\"'/}' config.json"
+  - name: something3
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ &&  sed -i 's/www\.example\.net/'\"$PRIVATE_IP\"'/' config.json"
+  - name: something4
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ &&  sed -i 's/example\.net/'\"$PEER_NAME\"'/' config.json"
+  - name: something5
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ && cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=server config.json | cfssljson -bare server"
+  - name: something6
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "cd /etc/kubernetes/pki/etcd/ && cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=peer config.json | cfssljson -bare peer"
+  - name: install etcd
+    become: yes
+    when: inventory_hostname in groups['control']
+    command: bash -lc "ETCD_VERSION=\"v3.1.12\" curl -sSL https://github.com/coreos/etcd/releases/download/${ETCD_VERSION}/etcd-${ETCD_VERSION}-linux-amd64.tar.gz | tar -xzv --strip-components=1 -C /usr/local/bin/"
+

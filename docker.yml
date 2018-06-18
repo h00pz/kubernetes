@@ -1,0 +1,21 @@
+---
+- hosts: all
+  tasks:
+  - name:    Install prerequisites
+    apt:     name={{item}} update_cache=yes
+    become: yes
+    with_items:
+     - apt-transport-https
+     - ca-certificates
+     - curl
+     - software-properties-common
+  - name:    Add Docker GPG key
+    apt_key: url=https://download.docker.com/linux/ubuntu/gpg
+    become: yes
+  - name:    Add Docker APT repository
+    become: yes
+    apt_repository:
+      repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ansible_distribution_release}} stable
+  - name:    Install Docker
+    apt:     name=docker-ce
+    become: yes
